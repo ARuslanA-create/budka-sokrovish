@@ -36,6 +36,32 @@
     .stage{width:auto;height:100vh;height:100dvh;max-height:none;min-width:100vw}
   }
 
+  /* Название игры вшито в фоновую картинку и занимает 26–73% её ширины. При cover по
+     высоте картинка обрезается по бокам, и на узком экране от «БУДКА СОКРОВИЩ» остаётся
+     огрызок «КДКА СОКРОВИ». Считается так: видимая доля ширины = соотношение сторон / 1.79,
+     обрезка названия начинается, когда доля меньше 0.47, то есть при соотношении ниже 5/6 —
+     это все телефоны и планшет в портрете. Там полоса с обрезанным названием закрывается
+     настоящим текстовым логотипом.
+     Проценты, а не пиксели: по высоте видна вся картинка целиком, поэтому название всегда
+     лежит на 19–27% высоты сцены, на каком бы экране игра ни открылась. */
+  .game-logo{display:none}
+  @media (max-aspect-ratio:5/6){
+    /* Плашка во всю ширину: полупрозрачная подложка не годилась — вшитые буквы
+       просвечивали из-под логотипа. Растворяется только по вертикали, поэтому
+       слева и справа резких краёв нет.
+       z-index ниже баннера фри-спинов (9): баннер вылезает выше барабанов и
+       достаёт до этой полосы, а непрозрачная плашка поверх него смотрелась дырой. */
+    .game-logo{position:absolute;left:0;right:0;top:15%;height:16%;z-index:8;
+      display:flex;align-items:center;justify-content:center;pointer-events:none;
+      background:linear-gradient(180deg,
+        rgba(9,6,2,0) 0%, rgba(9,6,2,1) 18%, rgba(9,6,2,1) 82%, rgba(9,6,2,0) 100%)}
+    .game-logo b{font-size:min(8.8vw,42px);line-height:1;font-weight:900;letter-spacing:.04em;
+      text-transform:uppercase;white-space:nowrap;
+      background:linear-gradient(180deg,#fff3c4 8%,var(--gold) 48%,#c98c1c 100%);
+      -webkit-background-clip:text;background-clip:text;color:transparent;
+      filter:drop-shadow(0 2px 0 rgba(90,50,8,.95)) drop-shadow(0 4px 10px rgba(0,0,0,.7))}
+  }
+
   /* верхнее наложение: иконки слева, баланс справа */
   /* Верхняя полоса уводится ниже системных кнопок VK (···, X, «ВКонтакте») через --vk-top.
      Без этого баланс в правом углу оказывается прямо под ними — замечание, уже полученное
@@ -299,6 +325,9 @@
       </div>
       <div class="pill" id="balanceBtnTop"><span class="coin"></span><span id="balanceTop">5 000</span></div>
     </div>
+
+    <!-- Логотип поверх фона: нужен только в портрете, где вшитое название обрезается. -->
+    <div class="game-logo" aria-hidden="true"><b>Будка Сокровищ</b></div>
 
     <div class="reels-wrap">
       <div class="reels" id="reels"></div>
