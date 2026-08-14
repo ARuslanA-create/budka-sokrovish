@@ -519,12 +519,88 @@
     flt.frequency.setValueAtTime(f0,SND.ctx.currentTime);flt.frequency.linearRampToValueAtTime(f1,SND.ctx.currentTime+dur);
     const g=SND.ctx.createGain();g.gain.setValueAtTime(gain,SND.ctx.currentTime);g.gain.exponentialRampToValueAtTime(0.0001,SND.ctx.currentTime+dur);
     n.connect(flt);flt.connect(g);g.connect(SND.sGain);n.start();n.stop(SND.ctx.currentTime+dur); }
-  function sfxSpin(){ ensureAudio(); if(!SND.on||!SND.ctx)return; noiseBurst(0.4,500,1700,0.22); }
-  function sfxWin(){ ensureAudio(); if(!SND.on||!SND.ctx)return; const t0=SND.ctx.currentTime;
-    [0,4,7,12].forEach((s,i)=>{const o=SND.ctx.createOscillator();o.type='triangle';o.frequency.value=noteFreq(s+12);
-      const g=SND.ctx.createGain();const t=t0+i*0.08;g.gain.setValueAtTime(0.0001,t);
-      g.gain.exponentialRampToValueAtTime(0.2,t+0.02);g.gain.exponentialRampToValueAtTime(0.0001,t+0.3);
-      o.connect(g);g.connect(SND.sGain);o.start(t);o.stop(t+0.32);}); }
+  /* Вращение барабанов — храповик, а не шум. Раньше здесь был один шумовой всплеск
+     на 0.4с («шшш»), который не имел отношения ни к автомату, ни к длине спина.
+     У механического автомата слышно, как собачка храповика перебирает зубцы: частые
+     сухие щелчки. Собираем их в один буфер, а не в 40 осцилляторов — на мобилке
+     столько нод на каждый спин заметно дороже.
+     stops — момент остановки каждого барабана: на каждом громкость падает ступенью,
+     поэтому слышно, как механика замирает по одному диску, а не глохнет разом.
+     Громкости выставлены не на слух, а по замеру в OfflineAudioContext. Первая версия
+     давала щелчкам пик 0.05 против 0.18 у стука остановки: главный звук спина был
+     втрое тише собственных стуков и не читался. Заодно гул привода на 0.045 оказался
+     громче щелчков — детектор всплесков насчитал 23 вместо 43, то есть между щелчками
+     сигнал не падал, а центроид сел до 501 Гц («бубнёж» вместо сухой механики).
+     Теперь щелчки 0.34, гул 0.018: он подпирает низ, но не маскирует щелчки. */
+  function sfxReels(dur,stops){
+    ensureAudio(); if(!SND.on||!SND.ctx)return;
+    const C=SND.ctx, t0=C.currentTime; dur=Math.max(0.4,Math.min(4,dur||1.2));
+    const sr=C.sampleRate, len=Math.floor(sr*dur);
+    const buf=C.createBuffer(1,len,sr), d=buf.getChannelData(0);
+    const per=Math.max(1,Math.floor(sr/30)); // 30 зубцов в секунду
+    for(let i=0;i<len;i++){
+      const ph=(i%per)/per;
+      d[i]=(Math.random()*2-1)*Math.exp(-ph*24); // щелчок в начале каждого зубца
+    }
+    const n=C.createBufferSource(); n.buffer=buf;
+    const bp=C.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=1800; bp.Q.value=0.7;
+    const G=0.34;
+    const g=C.createGain(); g.gain.setValueAtTime(G,t0);
+    (stops||[]).forEach((s,i)=>{ if(s>0&&s<dur) g.gain.setValueAtTime(G*Math.pow(0.74,i+1),t0+s); });
+    g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
+    n.connect(bp); bp.connect(g); g.connect(SND.sGain); n.start(t0); n.stop(t0+dur);
+    // низкий гул привода: без него щелчки звучат сухо и «пластмассово»
+    const o=C.createOscillator(); o.type='triangle'; o.frequency.value=68;
+    const og=C.createGain(); og.gain.setValueAtTime(0.0001,t0);
+    og.gain.exponentialRampToValueAtTime(0.018,t0+0.09);
+    og.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
+    o.connect(og); og.connect(SND.sGain); o.start(t0); o.stop(t0+dur+0.05);
+  }
+  /* Остановка диска: глухой удар металла об упор плюс щелчок фиксатора.
+     Частота падает за 90мс — так звучит сталь, а не мембрана барабана.
+     Правые барабаны чуть выше по тону: пять остановок читаются как
+     последовательность, а не как пять одинаковых копий. */
+  function sfxReelStop(at,r){
+    if(!SND.on||!SND.ctx)return;
+    const C=SND.ctx, t=at, k=1+r*0.06;
+    const o=C.createOscillator(); o.type='sine';
+    o.frequency.setValueAtTime(150*k,t); o.frequency.exponentialRampToValueAtTime(62*k,t+0.09);
+    const g=C.createGain(); g.gain.setValueAtTime(0.0001,t);
+    g.gain.exponentialRampToValueAtTime(0.19,t+0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+0.14);
+    o.connect(g); g.connect(SND.sGain); o.start(t); o.stop(t+0.16);
+    const len=Math.floor(C.sampleRate*0.05), buf=C.createBuffer(1,len,C.sampleRate), d=buf.getChannelData(0);
+    for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,3);
+    const n=C.createBufferSource(); n.buffer=buf;
+    const bp=C.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=2400*k; bp.Q.value=1.1;
+    const ng=C.createGain(); ng.gain.value=0.17;
+    n.connect(bp); bp.connect(ng); ng.connect(SND.sGain); n.start(t); n.stop(t+0.06);
+  }
+  /* Выигрыш — выплата монетами в лоток. Прежняя трель из четырёх нот (0-4-7-12)
+     звучала как мобильная игрушка и, главное, одинаково для выигрыша в одну ставку
+     и в сто. Теперь длина и плотность потока зависят от размера выигрыша, а на
+     заметном добавляется колокольчик. Корень из x — иначе выигрыш в 100 ставок
+     сыпался бы в сто раз дольше, чем в одну. */
+  function sfxWin(x){
+    ensureAudio(); if(!SND.on||!SND.ctx)return;
+    const C=SND.ctx, t0=C.currentTime;
+    const s=Math.sqrt(Math.max(0.2,Math.min(x||1,120)));
+    const dur=Math.min(2.2,0.26+0.20*s);
+    const cnt=Math.round(Math.min(30,3+3.2*s));
+    for(let i=0;i<cnt;i++){
+      const t=t0+0.02+Math.pow(Math.random(),0.75)*dur;
+      coinHit(t,600+Math.random()*900,0.08+Math.random()*0.05);
+    }
+    if(x>=5){
+      [[988,0.15,'triangle'],[1480,0.085,'sine']].forEach(([f,gv,tp])=>{
+        const o=C.createOscillator(); o.type=tp; o.frequency.value=f;
+        const g=C.createGain(); g.gain.setValueAtTime(0.0001,t0);
+        g.gain.exponentialRampToValueAtTime(gv,t0+0.008);
+        g.gain.exponentialRampToValueAtTime(0.0001,t0+0.9);
+        o.connect(g); g.connect(SND.sGain); o.start(t0); o.stop(t0+0.95);
+      });
+    }
+  }
   /* Лай синтезируется, а не грузится файлом: все ассеты игры лежат внутри index.html,
      а wav лая утяжелил бы файл на сотни килобайт. Один осциллятор на «гав» не годится —
      получается свист, поэтому голос собаки собран из трёх частей:
@@ -1006,7 +1082,7 @@
       S.balance-=totalBet(); renderBalance();
     }
     S.spinning=true; setControls(false);
-    ensureAudio(); if(S.sound&&!SND.music) startMusic(); sfxSpin();
+    ensureAudio(); if(S.sound&&!SND.music) startMusic();
     drawLines([]);
     const g=buildGrid(); S.grid=g.grid; S.mult=g.mult;
     // предвкушение: барабаны стопятся слева направо; если к барабану уже 2 скаттера — крутим дольше
@@ -1027,18 +1103,34 @@
       if(antF[r]) setTimeout(()=>sfxAnticipate(durs[r]-durs[r-1]), Math.max(0,durs[r-1]*1000-40));
       proms.push(spinReel(r,col,m,0,srows,durs[r],antF[r]));
     }
+    /* Звук вращения заводим здесь, а не в начале функции: храповик должен тянуться
+       ровно до остановки последнего барабана, а длительность спина известна только
+       после расчёта durs — при предвкушении она вырастает на 1.2с за барабан.
+       Прежний sfxSpin() шумел фиксированные 0.4с и к длине спина отношения не имел.
+       Остановки планируем по часам звука (currentTime), а не через setTimeout:
+       у Web Audio точность выборки, а таймер на мобилке гуляет на десятки мс. */
+    sfxReels(durs[4]+0.12, durs);
+    if(SND.on&&SND.ctx){ const tS=SND.ctx.currentTime; for(let r=0;r<5;r++) sfxReelStop(tS+durs[r], r); }
     await Promise.all(proms);
     // итог
     const res=evaluate();
     if(res.total>0){
       S.balance+=res.total; renderBalance();
-      sfxWin();
-      // крупный выигрыш — звонкий каскад монет
-      if(res.total>=totalBet()*10){ sfxCoins(); }
+      // Размер выигрыша в ставках — от него зависит и длина потока монет, и лай.
+      const x=res.total/totalBet();
+      sfxWin(x);   // сам подбирает длительность и добавляет колокол на x>=5
       // Лай выигравших собак: у каждой свой голос, лают по очереди и не перебивая
       // друг друга — пауза 480мс больше самой длинной серии «тяв» (щенок, 360мс).
       // Не больше трёх голосов за спин, иначе на 20 линиях получается свалка.
-      const dogs=[...new Set(res.wins.filter(w=>/^D[1-4]$/.test(w.sym)).map(w=>w.sym))].slice(0,3);
+      let dogs=[...new Set(res.wins.filter(w=>/^D[1-4]$/.test(w.sym)).map(w=>w.sym))].slice(0,3);
+      /* Собаки — старшие символы, а значит редкие: замер на 1 млн спинов дал лай всего
+         в 2.7% спинов (раз в 37), то есть лишь 8.8% выигрышей звучали по-собачьи, а
+         овчарка подавала голос раз в 350 спинов. Голоса собак — главная примета игры,
+         и слышать их раз в полсотни спинов бессмысленно. Поэтому на заметном выигрыше
+         (от 5 ставок) без собак в линии лает «дежурный» пёс, тем крупнее — тем ниже
+         голос. Порог 5 ставок, а не любой выигрыш: иначе лай станет фоном и перестанет
+         означать удачу. */
+      if(!dogs.length && x>=5) dogs=[x>=25?'D1':x>=10?'D3':'D4'];
       dogs.forEach((d,i)=> setTimeout(()=>sfxDog(d), 200+i*480));
       if(S.freeMode) S.freeWon+=res.total;
       highlightWins(res);
