@@ -1,0 +1,14 @@
+# Развёртывание: см. README.md рядом. Заменить нужно только id KV-хранилища —
+# его печатает `wrangler kv namespace create ORDERS`.
+#
+# Защищённый ключ ВКонтакте здесь НЕ хранится: папка server/ уезжает на GitHub Pages
+# вместе с игрой и доступна всем. Ключ ставится секретом:
+#   wrangler secret put VK_PROTECTED_KEY
+
+name = "budka-payments"
+main = "vk-payments.js"
+compatibility_date = "2025-01-01"
+
+[[kv_namespaces]]
+binding = "ORDERS"
+id = "ЗАМЕНИТЬ_НА_ID_ИЗ_WRANGLER"

@@ -245,6 +245,14 @@
   .ghost{background:var(--panel2);border:1px solid var(--line)!important;color:var(--text)}
   .ad-btn{background:rgba(51,214,190,.1);border:1px solid var(--gem-dk)!important;color:var(--gem)!important;margin-bottom:12px}
   .store-note{font-size:11px;color:var(--muted);margin-top:10px;line-height:1.45}
+  /* Пакеты монет за Голоса. Цена вынесена в правый край отдельным блоком: в окне
+     покупки её должно быть видно до нажатия, а не после. Никаких «₽» здесь быть
+     не может — виртуальная валюта продаётся только за Голоса. */
+  .shop-head{font-size:12px;font-weight:800;color:var(--gold);margin:14px 0 2px;text-align:left}
+  .pack{display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:left}
+  .pack span{font-size:13px;font-weight:700;line-height:1.25}
+  .pack b{font-family:var(--mono);font-size:13px;color:var(--gold);white-space:nowrap}
+  .pack:disabled{opacity:.5;cursor:default}
   .cal{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:6px 0 14px}
   .day{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 4px;text-align:center;position:relative}
   .day .n{font-size:10px;color:var(--muted)} .day .r{font-family:var(--mono);font-weight:700;color:var(--gold);font-size:13px;margin-top:3px}
@@ -377,23 +385,31 @@
   </div>
 </div>
 
-<!-- coins: рублей нет и быть не может — валюта виртуальная, продаваться может только за Голоса -->
+<!-- coins: рублей нет и быть не может — виртуальная валюта продаётся только за Голоса.
+     Бесплатные способы стоят выше платных: они основные, покупка — ускорение. -->
 <div class="modal-bg" id="storeModal"><div class="modal">
   <h2>Где взять монеты 🪙</h2>
-  <p>Монеты в игре бесплатные: платить за них нельзя и обменять на деньги нельзя. Самый быстрый способ — короткий ролик, самый выгодный — заходить каждый день.</p>
+  <!-- Про платные пакеты в тексте сознательно ни слова: раздел появляется только
+       когда сервер платежей ответил каталогом. Обещать покупку, которой в этой
+       сборке нет, нельзя — это ровно то «скоро», за которое отказывают. -->
+  <p>Монеты можно получать бесплатно: короткий ролик и награда за каждый день входа.</p>
   <button class="wide ghost ad-btn" id="storeAd">▶ Ролик за монеты → +1000</button>
   <button class="wide ghost" id="storeDaily">🎁 Ежедневная награда (до 4 000)</button>
   <div class="store-note" id="storeTimer"></div>
+  <div id="storePacks"></div>
+  <div class="store-note" id="storeLegal" style="display:none">Оплата — Голосами ВКонтакте. Монеты остаются игровыми: обменять их на деньги, вывести или передать другому игроку нельзя. Покупать необязательно — все возможности игры доступны бесплатно.</div>
   <button class="wide ghost" id="closeStore">Закрыть</button>
 </div></div>
 
-<!-- broke -->
+<!-- broke: кнопка «Закрыть» обязательна. Диалог, из которого нельзя выйти иначе как
+     посмотрев рекламу, модерация читает как замаскированный отказ. -->
 <div class="modal-bg" id="brokeModal"><div class="modal">
   <h2>Монеты кончились 🐶</h2>
-  <p>Пёс погрустнел: на минимальную ставку уже не хватает. Ролик даёт 1 000 монет — этого хватит на целую серию спинов. Платить в игре не за что.</p>
+  <p>Пёс погрустнел: на минимальную ставку уже не хватает. Ролик даёт 1 000 монет — этого хватит на целую серию спинов.</p>
   <button class="wide primary" id="brokeAd">▶ Ролик за монеты +1000</button>
   <button class="wide ghost" id="brokeStore">Другие способы</button>
   <div class="store-note" id="brokeTimer"></div>
+  <button class="wide ghost" id="brokeClose">Закрыть</button>
 </div></div>
 
 <!-- покупка бонуса: подтверждение обязательно — цена в 50 ставок это заметная сумма,
@@ -449,7 +465,9 @@
   <div id="tourGuard"></div>
   <div id="tourHole"></div>
   <div id="tourCard">
-    <div class="step" id="tourStep">ШАГ 1 ИЗ 7</div>
+    <!-- Настоящий счётчик ставит showTour по TOUR.length; здесь он только чтобы
+         вёрстка не прыгала. Шагов восемь, и число обязано совпадать. -->
+    <div class="step" id="tourStep">ШАГ 1 ИЗ 8</div>
     <h3 id="tourTitle"></h3>
     <p id="tourText"></p>
     <div class="row">
@@ -782,6 +800,16 @@
       if(!inVK) return {ok:false,unavailable:true};
       try{ await dlg('VKWebAppShare',{link:APP_URL}); return {ok:true}; }
       catch(e){ return {ok:false,cancelled:isCancel(e)}; }
+    },
+    /* Покупка за Голоса. Диалоговый метод: игрок вводит подтверждение, это дольше
+       любого таймаута. Возвращаем факт оплаты, но НЕ монеты: сколько начислить,
+       решает сервер (см. Shop.claim). */
+    async buyItem(item){
+      if(!inVK) return {ok:false,unavailable:true};
+      try{
+        const r=await dlg('VKWebAppShowOrderBox',{type:'item',item:item});
+        return {ok:!!(r&&r.success), orderId:r&&r.order_id};
+      }catch(e){ return {ok:false,cancelled:isCancel(e)}; }
     }
   };
 
@@ -1319,6 +1347,99 @@
     updateCoinTimers();
   }
 
+  /* ===== ПОКУПКА МОНЕТ ЗА ГОЛОСА =====
+     Клиент здесь не решает ничего. Он открывает окно оплаты и потом спрашивает
+     сервер, сколько монет начислить: цены знает каталог воркера, а факт оплаты —
+     уведомление Callback API. Если начислять по ответу ShowOrderBox, монеты можно
+     выдать себе из консоли, подделав success, — правила это запрещают прямо
+     («нельзя начислять товар только по клиентскому ответу»).
+
+     PAY_API пустой до развёртывания воркера (см. server/README.md). Пока он пустой,
+     раздел покупки не рисуется вообще: кнопка-заглушка «скоро» — гарантированный
+     отказ модерации, а бесплатные способы получения монет самодостаточны. */
+  const PAY_API='';
+  const paysOn=()=>!!PAY_API&&inVK;
+
+  const golosWord=n=>{ const a=n%100, b=n%10;
+    if(a>=11&&a<=14) return 'голосов';
+    if(b===1) return 'голос';
+    if(b>=2&&b<=4) return 'голоса';
+    return 'голосов'; };
+
+  const Shop={
+    packs:[], busy:false,
+    /* Каталог берём с сервера, а не держим в игре: цена в Голосах задаётся в кабинете
+       ВКонтакте и в воркере, и третья копия в клиенте однажды разъедется с ними. */
+    async loadPacks(){
+      if(!paysOn()) return;
+      try{
+        const r=await fetch(PAY_API+'/items',{cache:'no-store'});
+        const d=await r.json();
+        if(d&&Array.isArray(d.items)) this.packs=d.items.filter(p=>p&&p.item&&p.price>0&&p.coins>0);
+      }catch(e){ /* нет связи — раздел просто не появится */ }
+      renderPacks();
+    },
+    /* Единственный путь, которым купленные монеты попадают в баланс. Сервер помечает
+       заказ выданным до того, как ответит, поэтому повторный запрос ничего не удвоит:
+       звать claim можно смело — и на старте, и после покупки. */
+    async claim(silent){
+      if(!paysOn()) return 0;
+      try{
+        const r=await fetch(PAY_API+'/claim',{method:'POST',
+          headers:{'content-type':'application/x-www-form-urlencoded'},
+          body:new URLSearchParams({launch:location.search}).toString()});
+        const d=await r.json();
+        const c=Math.max(0,Math.floor(Number(d&&d.coins)||0));
+        if(c>0){ addCoins(c); toast('Монеты зачислены: +'+fmt(c)+' 🪙',3400); }
+        /* Возврат уже начисленных монет сервер вычитает из следующей покупки. Об этом
+           надо сказать вслух, иначе покупка выглядит недоданной. */
+        if(d&&d.refunded>0) toast('Из начисления вычтено '+fmt(d.refunded)+' 🪙 за возвращённую покупку.',4600);
+        return c;
+      }catch(e){ if(!silent) toast('Не удалось связаться с сервером покупок.'); return 0; }
+    },
+    async buy(pack,btn){
+      if(this.busy) return;
+      this.busy=true; const label=btn.innerHTML; btn.disabled=true;
+      try{
+        const r=await Platform.buyItem(pack.item);
+        if(!r.ok){
+          if(r.cancelled){ /* отказ от покупки — молча, ругаться нельзя */ }
+          else if(r.unavailable) toast('Покупка доступна в приложении ВКонтакте.');
+          else toast('Окно оплаты не открылось. Попробуйте ещё раз.');
+          return;
+        }
+        /* Гонка: ShowOrderBox отвечает клиенту раньше, чем ВКонтакте успевает
+           доставить уведомление воркеру. Поэтому спрашиваем сервер несколько раз
+           с растущей паузой, а если монет всё ещё нет — обещаем, что не потеряются:
+           заказ уже лежит на сервере и начислится при следующем запросе. */
+        btn.textContent='Зачисление…';
+        for(const ms of [400,900,1800,3500]){
+          await wait(ms);
+          if(await this.claim(true)) return;
+        }
+        toast('Оплата прошла. Монеты появятся в течение минуты — они не потеряются.',5200);
+      } finally { this.busy=false; btn.disabled=false; btn.innerHTML=label; }
+    }
+  };
+
+  function renderPacks(){
+    const box=$('storePacks'), legal=$('storeLegal'); if(!box) return;
+    box.innerHTML='';
+    const on=paysOn()&&Shop.packs.length>0;
+    if(legal) legal.style.display=on?'block':'none';
+    if(!on) return;
+    const h=document.createElement('div'); h.className='shop-head'; h.textContent='ПАКЕТЫ МОНЕТ ЗА ГОЛОСА';
+    box.appendChild(h);
+    Shop.packs.forEach(p=>{
+      const b=document.createElement('button'); b.className='wide ghost pack';
+      const t=document.createElement('span'); t.textContent=p.title;
+      const c=document.createElement('b'); c.textContent=p.price+' '+golosWord(p.price);
+      b.appendChild(t); b.appendChild(c);
+      b.onclick=()=>Shop.buy(p,b);
+      box.appendChild(b);
+    });
+  }
+
   /* ===== СОЦШЕР ===== */
   async function doShare(){
     const r=await Platform.share();
@@ -1481,7 +1602,25 @@
   async function save(){ await Platform.storageSet(KEY, JSON.stringify({balance:S.balance,betIdx:S.betIdx,
     loginStreak:S.loginStreak,lastDay:S.lastDay,dailyClaimed:S.dailyClaimed,sound:S.sound,
     tourDone:S.tourDone,nextFree:S.nextFree})); }
-  async function load(){ const raw=await Platform.storageGet(KEY); if(raw){try{Object.assign(S,JSON.parse(raw));}catch(e){}} }
+  /* Сохранение читаем по списку полей, а не через Object.assign. Раньше в состояние
+     заезжало всё, что лежало в записи: подложив в хранилище `{"spinning":true}`, игру
+     можно было насмерть заблокировать (спин навсегда считает себя идущим), а `betIdx`
+     вне диапазона ломал ставку. Значения проверяем по типу и зажимаем в границы:
+     хранилище лежит на устройстве игрока, значит это ввод извне, а не наши данные. */
+  const num=(v,min,max,def)=>{ const n=Number(v); return Number.isFinite(n)?Math.min(max,Math.max(min,Math.floor(n))):def; };
+  async function load(){
+    const raw=await Platform.storageGet(KEY); if(!raw) return;
+    let d=null; try{ d=JSON.parse(raw); }catch(e){ return; }
+    if(!d||typeof d!=='object') return;
+    S.balance=num(d.balance,0,1e12,S.balance);
+    S.betIdx=num(d.betIdx,0,BETS.length-1,S.betIdx);
+    S.loginStreak=num(d.loginStreak,1,DAILY.length,S.loginStreak);
+    S.lastDay=/^\d{4}-\d{2}-\d{2}$/.test(d.lastDay)?d.lastDay:S.lastDay;
+    S.dailyClaimed=!!d.dailyClaimed;
+    S.sound=d.sound===undefined?S.sound:!!d.sound;
+    S.tourDone=!!d.tourDone;
+    S.nextFree=num(d.nextFree,0,Date.now()+FREE_PERIOD,S.nextFree);
+  }
 
   /* ===== INIT ===== */
   async function init(){
@@ -1519,6 +1658,7 @@
     $('storeDaily').onclick=()=>{closeStore();openDaily();};
     $('brokeAd').onclick=e=>watchAd(e.currentTarget,1000);
     $('brokeStore').onclick=()=>{closeBroke();openStore();};
+    $('brokeClose').onclick=closeBroke;
     $('claimDaily').onclick=claimDaily; $('closeDaily').onclick=()=>$('dailyModal').classList.remove('show');
     document.querySelectorAll('.modal-bg').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('show');}));
 
@@ -1542,6 +1682,11 @@
 
     // Бесплатные монеты идут по таймеру, поэтому тик нужен постоянно.
     updateCoinTimers(); setInterval(freeCoinsTick,1000);
+
+    /* Покупки: сознательно без await — недоступный сервер платежей не должен
+       задерживать загрузку игры. claim на старте обязателен: если игрок закрыл
+       приложение сразу после оплаты, монеты ждут его в заказе на сервере. */
+    Shop.loadPacks(); Shop.claim(true);
 
     // Панели могли изменить высоту после появления иконок и подписей —
     // барабаны пересчитываем по факту готовой раскладки.
