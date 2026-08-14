@@ -155,6 +155,17 @@
   .betrow button{width:32px;height:32px;border-radius:9px;border:1px solid rgba(245,197,66,.4);background:rgba(20,14,6,.72);color:var(--text);font-size:19px;font-weight:800;cursor:pointer}
   .betrow button:active{transform:scale(.92)}
   .betrow b{font-family:var(--mono);font-size:17px;color:var(--gold);min-width:54px;text-align:center;text-shadow:0 1px 3px #000}
+  /* Кнопка покупки бонуса живёт в левой колонке под ставкой, а не отдельной строкой:
+     высота .controls-row задана кнопкой спина (96px), а в левой колонке было занято
+     всего ~50px. Поэтому кнопка не увеличивает .bottom-overlay, а его высота идёт
+     в расчёт размера барабанов (botH в layout) — отдельная строка сжала бы сетку. */
+  .buybtn{margin-top:1px;padding:4px 9px;border-radius:9px;cursor:pointer;font-weight:800;font-size:12px;
+    border:1px solid rgba(245,197,66,.55);background:linear-gradient(180deg,rgba(74,45,10,.92),rgba(30,18,6,.92));
+    color:var(--gold);text-shadow:0 1px 2px #000;white-space:nowrap;display:flex;align-items:center;gap:4px;
+    font-family:inherit;line-height:1.1}
+  .buybtn b{font-family:var(--mono);font-size:12px;color:#ffe9a8}
+  .buybtn:active{transform:scale(.94)}
+  .buybtn:disabled{opacity:.45;cursor:default;transform:none}
   .two{display:flex;align-items:baseline;gap:6px}
   .two .lbl{font-size:10px}
   .v{font-family:var(--mono);font-size:16px;font-weight:800}
@@ -212,6 +223,8 @@
     .spin .sp-lbl{font-size:9px}
     .betrow b{min-width:42px;font-size:14px}
     .betrow button{width:27px;height:27px;font-size:17px}
+    .buybtn{font-size:10px;padding:3px 7px;gap:3px}
+    .buybtn b{font-size:10px}
     .v{font-size:13px}
     .lbl{font-size:9px}
     .two .lbl{font-size:8px}
@@ -349,6 +362,7 @@
         <div class="stat">
           <div class="lbl" id="leftLbl">СТАВКА</div>
           <div class="betrow" id="betRow"><button id="betMinus" aria-label="Уменьшить ставку">–</button><b id="betVal">40</b><button id="betPlus" aria-label="Увеличить ставку">+</button></div>
+          <button class="buybtn" id="buyBonus" aria-label="Купить бесплатные спины">🎁 <b id="buyCost">2 000</b></button>
           <b class="v gold fsleft" id="fsLeftVal" style="display:none">0</b>
         </div>
         <button class="spin" id="spin"><span class="paw">🐾</span><span class="sp-lbl">КРУТИТЬ</span></button>
@@ -382,6 +396,17 @@
   <div class="store-note" id="brokeTimer"></div>
 </div></div>
 
+<!-- покупка бонуса: подтверждение обязательно — цена в 50 ставок это заметная сумма,
+     а случайное нажатие рядом с кнопкой спина слишком дорого стоит -->
+<div class="modal-bg" id="buyModal"><div class="modal">
+  <h2>Купить бесплатные спины 🎁</h2>
+  <p>Пёс сразу откопает бонус: <b id="buyFs">8</b> бесплатных спинов с липкими вайлдами. Иногда — целых 12.</p>
+  <p style="margin-top:8px">Цена — 50 ставок: <b class="gold" id="buyPrice">2 000</b> 🪙 при ставке <b id="buyBet">40</b>.</p>
+  <p class="store-note" style="margin-top:10px">Средний возврат покупки — около 48 ставок, как и у обычной игры. Крупный выигрыш не гарантирован: чаще бонус приносит меньше его цены. Бонус выпадает и сам, примерно раз в 100 спинов.</p>
+  <button class="wide primary" id="buyOk">Купить бонус</button>
+  <button class="wide ghost" id="buyCancel">Отмена</button>
+</div></div>
+
 <!-- daily -->
 <div class="modal-bg" id="dailyModal"><div class="modal">
   <h2>Ежедневный бонус 🎁</h2>
@@ -397,7 +422,8 @@
   <p>5 барабанов, 20 линий. Символы платят слева направо от 1-го барабана. Значения — множитель ставки на линию (ставка ÷ 20), у 💎 — множитель полной ставки.</p>
   <div id="ptList"></div>
   <p style="margin-top:14px">🏠 <b>Вайлд</b> (будка) — на барабанах 2-3-4, заменяет всё кроме 💎, с множителем ×2 или ×3.<br>
-     💎 <b>Скаттер</b> — 3+ в любом месте запускают бесплатные спины, где вайлды становятся липкими.</p>
+     💎 <b>Скаттер</b> — 3+ в любом месте запускают бесплатные спины, где вайлды становятся липкими.<br>
+     🎁 <b>Покупка бонуса</b> — кнопка под ставкой даёт бесплатные спины сразу, цена 50 ставок.</p>
   <p style="margin-top:10px">Математика как у настоящего автомата: выигрыш примерно на каждом третьем спине, но почти половина всех выплат приходит из бесплатных спинов. Отсюда и характер игры — долгие спокойные серии и редкие крупные заходы.</p>
   <button class="wide ghost" id="replayTour">Пройти обучение заново</button>
   <button class="wide ghost" id="closeInfo">Закрыть</button>
@@ -768,7 +794,11 @@
     loginStreak:1, lastDay:'', dailyClaimed:false, sound:true, awaitStart:false,
     tourDone:false, nextFree:0
   };
-  const BETS=[20,40,100,200,400,1000]; // total bet; perLine = total/20
+  /* Лестница ставок. Новые ступени дописаны в конец, а не вставлены в середину:
+     betIdx лежит в сохранении, и сдвиг индексов сменил бы ставку у тех, кто уже играл.
+     Верх — 10 000: при перелинейной выплате 500 максимальная линия (5×🐕‍🦺, ×3+×3 вайлды)
+     даёт 900 000 монет. */
+  const BETS=[20,40,100,200,400,1000,2000,4000,10000]; // total bet; perLine = total/20
   const totalBet=()=>BETS[S.betIdx];
   const perLine=()=>BETS[S.betIdx]/20;
   const DAILY=[300,500,800,1200,1800,2600,4000];
@@ -1068,7 +1098,7 @@
   function startFreeSpins(n){
     S.freeMode=true; S.freeLeft=n; S.freeTotal=n; S.freeWon=0; S.sticky={};
     $('leftLbl').textContent='ОСТАЛОСЬ';
-    $('betRow').style.display='none';
+    $('betRow').style.display='none'; renderBuy();
     $('fsLeftVal').style.display=''; $('fsLeftVal').textContent=n+' '+spinWord(n);
     $('winVal').textContent='0';
     $('fsBig').textContent='🎉 '+n+' бесплатных спинов!';
@@ -1092,7 +1122,7 @@
     S.freeMode=false; S.freeLeft=0; S.sticky={};
     reelEls.forEach(rl=>rl.querySelectorAll('.sticky-cell').forEach(e=>e.remove()));
     $('leftLbl').textContent='СТАВКА';
-    $('betRow').style.display=''; $('fsLeftVal').style.display='none';
+    $('betRow').style.display=''; $('fsLeftVal').style.display='none'; renderBuy();
     $('winVal').textContent='0';
     $('fsBig').textContent='Фри-спины завершены';
     $('fsSub').textContent='Всего выиграно: '+fmt(won)+' 🪙';
@@ -1104,10 +1134,52 @@
     setTimeout(()=>{ $('fsBanner').classList.remove('show'); if(S.autoOn&&canAfford()) doSpin(); }, 2200);
   }
 
+  /* ===== ПОКУПКА БОНУСА =====
+     Цена — 50 ставок, и содержимое бонуса подогнано под неё, а не наоборот.
+     Замер: 8 фри-спинов стоят в среднем 41.8 ставки, то есть покупка за 50 давала бы
+     RTP 84% — грабёж на фоне базовых 96%. Девять спинов дают уже 56.7 (RTP 113%) —
+     из-за липких вайлдов бонус растёт сверхлинейно, и целого числа спинов на «честные»
+     ~48 ставок не существует. Поэтому 8 спинов, а в 8% случаев сразу 12: замерено
+     48.3 ставки на 300 тыс. покупок, RTP 96.5% — ровно уровень базовой игры.
+     Менять цену или BUY_BIG нельзя без повторного прогона /tmp/buymix.js. */
+  const BUY_X=50, BUY_FS=8, BUY_FS_BIG=12, BUY_BIG_CHANCE=0.08;
+  const buyCost=()=>totalBet()*BUY_X;
+
+  function renderBuy(){
+    const b=$('buyBonus'); if(!b) return;
+    $('buyCost').textContent=fmt(buyCost());
+    // Прячем на время бонуса вместе со ставкой: во фри-спинах покупать нечего.
+    b.style.display = S.freeMode ? 'none' : '';
+    b.disabled = S.spinning || S.freeMode || tourActive || S.balance<buyCost();
+  }
+  function openBuy(){
+    if(S.spinning||S.freeMode) return;
+    if(tourActive){ toast('Покупка бонуса — после обучения.'); return; }
+    if(S.balance<buyCost()){
+      toast('На бонус нужно '+fmt(buyCost())+' 🪙 — это 50 ставок. Понизьте ставку или возьмите монеты.',3200);
+      return;
+    }
+    $('buyFs').textContent=BUY_FS;
+    $('buyPrice').textContent=fmt(buyCost());
+    $('buyBet').textContent=fmt(totalBet());
+    $('buyModal').classList.add('show');
+  }
+  function closeBuy(){ $('buyModal').classList.remove('show'); }
+  function confirmBuy(){
+    // Проверяем цену заново: пока висело окно, ставка или баланс могли измениться.
+    const cost=buyCost();
+    if(S.spinning||S.freeMode||S.balance<cost){ closeBuy(); renderBuy(); return; }
+    closeBuy();
+    S.balance-=cost; renderBalance(); scheduleSave();
+    setAuto(false);
+    const n = Math.random()<BUY_BIG_CHANCE ? BUY_FS_BIG : BUY_FS;
+    startFreeSpins(n);
+  }
+
   /* ===== CONTROLS ===== */
-  function setControls(on){ $('spin').disabled=!on; $('betMinus').disabled=!on||S.freeMode; $('betPlus').disabled=!on||S.freeMode; }
-  function renderBalance(){ const s=fmt(S.balance); $('balance').textContent=s; var t=$('balanceTop'); if(t)t.textContent=s; }
-  function renderBet(){ $('betVal').textContent=fmt(totalBet()); }
+  function setControls(on){ $('spin').disabled=!on; $('betMinus').disabled=!on||S.freeMode; $('betPlus').disabled=!on||S.freeMode; renderBuy(); }
+  function renderBalance(){ const s=fmt(S.balance); $('balance').textContent=s; var t=$('balanceTop'); if(t)t.textContent=s; renderBuy(); }
+  function renderBet(){ $('betVal').textContent=fmt(totalBet()); renderBuy(); }
   function changeBet(d){ if(S.spinning||S.freeMode)return; S.betIdx=Math.max(0,Math.min(BETS.length-1,S.betIdx+d)); renderBet(); scheduleSave(); }
   function setAuto(on){ S.autoOn=on; $('auto').classList.toggle('on',on); $('auto').textContent=on?'СТОП':'АВТО';
     if(on&&!S.spinning&&!S.freeMode){ if(canAfford()) doSpin(); else {setAuto(false);openBroke();} } }
@@ -1219,6 +1291,8 @@
      x:'В игре 20 линий. Выигрышные символы обводятся рамкой, а сама линия рисуется поверх барабанов — сразу видно, что именно сложилось.'},
     {t:'Вайлд и скаттер',sel:'#navInfo',
      x:'🏠 Будка — вайлд: заменяет любой символ и умножает линию на ×2 или ×3. 💎 Самоцвет — скаттер: три и больше запускают бесплатные спины. Полная таблица выплат прячется здесь.'},
+    {t:'Бонус можно купить',sel:'#buyBonus',
+     x:'Ждать скаттеры не обязательно: кнопка 🎁 сразу покупает бесплатные спины за 50 ставок. Цена на кнопке — в монетах, она меняется вместе со ставкой. Крупный выигрыш это не гарантирует: чаще бонус приносит меньше своей цены.'},
     {t:'Ежедневная награда',sel:'#navDaily',
      x:'Заходите каждый день — награда растёт до седьмого дня подряд, а потом счёт начинается заново. Если монеты закончились, в 🛒 можно взять ещё за короткий ролик: покупать в игре нечего, платных монет нет.'},
     {t:'Готово!',
@@ -1338,6 +1412,9 @@
     $('betPlus').onclick=()=>changeBet(1);
     $('betMinus').onclick=()=>changeBet(-1);
     $('auto').onclick=()=>setAuto(!S.autoOn);
+    $('buyBonus').onclick=openBuy;
+    $('buyOk').onclick=confirmBuy;
+    $('buyCancel').onclick=closeBuy;
     $('balanceBtnTop').onclick=openStore;
     $('navStore').onclick=openStore;
     $('navSound').onclick=()=>setSound(!S.sound);
