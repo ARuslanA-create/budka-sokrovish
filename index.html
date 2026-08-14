@@ -235,9 +235,15 @@
   /* modal */
   /* z-index: загрузчик 60 > тост 55 > онбординг 50 > модальные 47 > стартовое меню 45.
      Модальные окна обязаны быть выше меню (их открывают из меню) и ниже онбординга. */
-  .modal-bg{position:fixed;inset:0;background:rgba(8,5,2,.75);display:none;align-items:center;justify-content:center;z-index:47;padding:20px;backdrop-filter:blur(3px)}
+  /* Отступы модалки считаются с safe area и с insets VK: высокое окно (правила
+     выплат, календарь награды) на телефоне занимает почти весь экран, и без этого
+     его верх уезжает под системные кнопки VK, а кнопка «Закрыть» — под домашнюю
+     полосу iPhone. Замечание «нижняя часть интерфейса срезается» уже получали. */
+  .modal-bg{position:fixed;inset:0;background:rgba(8,5,2,.75);display:none;align-items:center;justify-content:center;z-index:47;
+    padding:calc(16px + var(--vk-top) + env(safe-area-inset-top)) 20px calc(16px + var(--vk-bottom) + env(safe-area-inset-bottom));
+    backdrop-filter:blur(3px)}
   .modal-bg.show{display:flex}
-  .modal{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px 20px;max-width:360px;width:100%;text-align:center;max-height:88vh;overflow:auto}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px 20px;max-width:360px;width:100%;text-align:center;max-height:100%;overflow:auto}
   .modal h2{margin:0 0 6px;font-size:19px}
   .modal p{margin:0 0 14px;color:var(--muted);font-size:13px;line-height:1.5}
   .modal .wide{width:100%;border:none;border-radius:12px;padding:14px;font-size:15px;font-weight:800;cursor:pointer;margin-top:8px}
@@ -370,7 +376,10 @@
         <div class="stat">
           <div class="lbl" id="leftLbl">СТАВКА</div>
           <div class="betrow" id="betRow"><button id="betMinus" aria-label="Уменьшить ставку">–</button><b id="betVal">40</b><button id="betPlus" aria-label="Увеличить ставку">+</button></div>
-          <button class="buybtn" id="buyBonus" aria-label="Купить бесплатные спины">🎁 <b id="buyCost">2 000</b></button>
+          <!-- На кнопке слово, а не цена: голое «10 000» рядом со ставкой читалось как
+               второй счётчик, а не как кнопка. Цена всё равно показывается в окне
+               подтверждения, а на самой кнопке живёт в подсказке и aria-label. -->
+          <button class="buybtn" id="buyBonus" aria-label="Купить бесплатные спины">🎁 Купить бонус</button>
           <b class="v gold fsleft" id="fsLeftVal" style="display:none">0</b>
         </div>
         <button class="spin" id="spin"><span class="paw">🐾</span><span class="sp-lbl">КРУТИТЬ</span></button>
@@ -418,7 +427,11 @@
   <h2>Купить бесплатные спины 🎁</h2>
   <p>Пёс сразу откопает бонус: <b id="buyFs">8</b> бесплатных спинов с липкими вайлдами. Иногда — целых 12.</p>
   <p style="margin-top:8px">Цена — 50 ставок: <b class="gold" id="buyPrice">2 000</b> 🪙 при ставке <b id="buyBet">40</b>.</p>
-  <p class="store-note" style="margin-top:10px">Средний возврат покупки — около 48 ставок, как и у обычной игры. Крупный выигрыш не гарантирован: чаще бонус приносит меньше его цены. Бонус выпадает и сам, примерно раз в 100 спинов.</p>
+  <!-- Одна фраза вместо прежнего абзаца с цифрами: «средний возврат 48 ставок» читался
+       как отчёт о математике и пугал больше, чем объяснял. Саму оговорку убирать нельзя —
+       обещать выигрыш правила VK запрещают прямо, а покупка бонуса это как раз то место,
+       где игрок ждёт обещания. -->
+  <p class="store-note" style="margin-top:10px">Крупный выигрыш не гарантирован.</p>
   <button class="wide primary" id="buyOk">Купить бонус</button>
   <button class="wide ghost" id="buyCancel">Отмена</button>
 </div></div>
@@ -494,7 +507,14 @@
   const $=id=>document.getElementById(id);
 
   /* ===== ЗВУК (Web Audio, синтез) ===== */
-  const SND={ctx:null,on:true,music:false,mGain:null,sGain:null,timer:null,step:0,curChord:0};
+  const SND={ctx:null,on:true,music:false,mGain:null,mDuck:null,sGain:null,timer:null,step:0,curChord:0,duckEnd:0};
+  /* Музыка была громче всего остального: замер дал ей RMS 0.043 против 0.014 у спина,
+     0.013 у выигрыша и 0.024 у лая — то есть фон звучал в три раза плотнее событий,
+     из-за которых игру вообще слушают. Отсюда два числа: базовый уровень фона
+     (MUSIC_LEVEL) и уровень, до которого он приседает на время спина, выплаты и
+     бонуса (DUCK). Приседание — обычный приём автоматов: музыка не спорит с событием,
+     а уходит под него и возвращается. */
+  const MUSIC_LEVEL=0.42, DUCK=0.3;
   const ROOT=261.63; // C4
   const noteFreq=s=>ROOT*Math.pow(2,s/12);
   const PENTA=[0,2,4,7,9];
@@ -503,7 +523,11 @@
     if(!SND.ctx){
       const AC=window.AudioContext||window.webkitAudioContext; if(!AC)return;
       SND.ctx=new AC();
-      SND.mGain=SND.ctx.createGain(); SND.mGain.gain.value=0; SND.mGain.connect(SND.ctx.destination);
+      /* Шина музыки идёт через отдельный узел приседания: сам mGain занят
+         включением-выключением музыки игроком, и мешать в него автоматику
+         нельзя — stopMusic отменяет запланированные значения. */
+      SND.mDuck=SND.ctx.createGain(); SND.mDuck.gain.value=1; SND.mDuck.connect(SND.ctx.destination);
+      SND.mGain=SND.ctx.createGain(); SND.mGain.gain.value=0; SND.mGain.connect(SND.mDuck);
       SND.sGain=SND.ctx.createGain(); SND.sGain.gain.value=0.62; SND.sGain.connect(SND.ctx.destination);
     }
     if(SND.ctx.state==='suspended') SND.ctx.resume();
@@ -524,8 +548,23 @@
     SND.step++; }
   function startMusic(){ ensureAudio(); if(!SND.ctx)return; SND.music=true;
     SND.mGain.gain.cancelScheduledValues(SND.ctx.currentTime);
-    SND.mGain.gain.linearRampToValueAtTime(0.9,SND.ctx.currentTime+0.6);
+    SND.mGain.gain.linearRampToValueAtTime(MUSIC_LEVEL,SND.ctx.currentTime+0.6);
     if(!SND.timer) SND.timer=setInterval(musicTick,250); }
+  /* Приседание музыки под событие. Уже начатое приседание не прерываем и не удлиняем
+     без нужды: серия спинов подряд иначе то поднимает фон, то опускает — это слышно
+     хуже, чем ровно приглушённая музыка. */
+  function duckMusic(dur,level){
+    if(!SND.ctx||!SND.mDuck) return;
+    const g=SND.mDuck.gain, t=SND.ctx.currentTime, end=t+Math.max(0.25,dur||0.6);
+    if(end<=SND.duckEnd) return;
+    SND.duckEnd=end;
+    const lv=level||DUCK;
+    g.cancelScheduledValues(t);
+    g.setValueAtTime(g.value,t);
+    g.linearRampToValueAtTime(lv,t+0.09);
+    g.setValueAtTime(lv,end);
+    g.linearRampToValueAtTime(1,end+0.55);
+  }
   function stopMusic(){ if(!SND.ctx){SND.music=false;return;} SND.music=false;
     SND.mGain.gain.cancelScheduledValues(SND.ctx.currentTime);
     SND.mGain.gain.linearRampToValueAtTime(0,SND.ctx.currentTime+0.3);
@@ -573,6 +612,8 @@
     og.gain.exponentialRampToValueAtTime(0.018,t0+0.09);
     og.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
     o.connect(og); og.connect(SND.sGain); o.start(t0); o.stop(t0+dur+0.05);
+    // спин длится секунды и перекрывает музыку целиком — приглушаем её на это время
+    duckMusic(dur+0.4,0.45);
   }
   /* Остановка диска: глухой удар металла об упор плюс щелчок фиксатора.
      Частота падает за 90мс — так звучит сталь, а не мембрана барабана.
@@ -599,15 +640,27 @@
      и в сто. Теперь длина и плотность потока зависят от размера выигрыша, а на
      заметном добавляется колокольчик. Корень из x — иначе выигрыш в 100 ставок
      сыпался бы в сто раз дольше, чем в одну. */
-  function sfxWin(x){
+  /* Лай передаётся сюда, а не играется отдельным setTimeout, и вот почему. Замер
+     показал: «гав» имел RMS 0.024, а поток монет в том же окне — 0.0195, то есть
+     собаку было слышно на 2 дБ громче монет, поверх которых она и сыпалась, да ещё
+     под музыку с RMS 0.043. Формально лай звучал, фактически его не было. Теперь
+     монеты идут по отдельной шине, которая приседает под каждый «гав», сам лай
+     ставится по часам Web Audio (setTimeout на мобилке гуляет), а первый «гав»
+     опережает поток монет — сначала пёс, потом касса. */
+  function sfxWin(x,dogs){
     ensureAudio(); if(!SND.on||!SND.ctx)return;
     const C=SND.ctx, t0=C.currentTime;
     const s=Math.sqrt(Math.max(0.2,Math.min(x||1,120)));
     const dur=Math.min(2.2,0.26+0.20*s);
     const cnt=Math.round(Math.min(30,3+3.2*s));
+    const list=(dogs||[]).filter(d=>DOG_BARK[d]).slice(0,3);
+    // шина монет: её и приседаем, не трогая лай
+    const bus=C.createGain(); bus.gain.setValueAtTime(1,t0); bus.connect(SND.sGain);
+    const bt=list.map((d,i)=>{ const t=t0+0.02+i*0.52; DOG_BARK[d](t); return t; });
+    const start=t0+(bt.length?0.20:0.02);
     for(let i=0;i<cnt;i++){
-      const t=t0+0.02+Math.pow(Math.random(),0.75)*dur;
-      coinHit(t,600+Math.random()*900,0.08+Math.random()*0.05);
+      const t=start+Math.pow(Math.random(),0.75)*dur;
+      coinHit(t,600+Math.random()*900,0.08+Math.random()*0.05,bus);
     }
     if(x>=5){
       [[988,0.15,'triangle'],[1480,0.085,'sine']].forEach(([f,gv,tp])=>{
@@ -615,9 +668,17 @@
         const g=C.createGain(); g.gain.setValueAtTime(0.0001,t0);
         g.gain.exponentialRampToValueAtTime(gv,t0+0.008);
         g.gain.exponentialRampToValueAtTime(0.0001,t0+0.9);
-        o.connect(g); g.connect(SND.sGain); o.start(t0); o.stop(t0+0.95);
+        o.connect(g); g.connect(bus); o.start(t0); o.stop(t0+0.95);
       });
     }
+    // окна под лай: 0.22 от полного уровня — «гав» выходит вперёд, касса остаётся фоном
+    bt.forEach(t=>{
+      bus.gain.setValueAtTime(1,Math.max(t0,t-0.10));
+      bus.gain.linearRampToValueAtTime(0.22,t);
+      bus.gain.setValueAtTime(0.22,t+0.34);
+      bus.gain.linearRampToValueAtTime(1,t+0.5);
+    });
+    duckMusic(dur+(bt.length?bt.length*0.52+0.3:0)+0.3);
   }
   /* Лай синтезируется, а не грузится файлом: все ассеты игры лежат внутри index.html,
      а wav лая утяжелил бы файл на сотни килобайт. Один осциллятор на «гав» не годится —
@@ -666,30 +727,59 @@
      Мелкие лают очередью, крупные — по одному разу. Ключи совпадают с символами барабанов. */
   const DOG_BARK={
     // 🐕‍🦺 Овчарка — низкий грудной «воф», один раз
-    D1:t=>{ barkVoice(t,{f0:150,f1:95, dur:0.30,gain:0.42,F1:340,F2:820, noise:0.20}); },
+    D1:t=>{ barkVoice(t,{f0:150,f1:95, dur:0.30,gain:0.78,F1:340,F2:820, noise:0.34}); },
     // 🐩 Пудель — звонкое «тяв-тяв»
-    D2:t=>{ barkVoice(t,{f0:430,f1:300,dur:0.13,gain:0.34,F1:850,F2:2100,noise:0.17});
-            barkVoice(t+0.19,{f0:460,f1:320,dur:0.12,gain:0.30,F1:880,F2:2200,noise:0.15}); },
+    D2:t=>{ barkVoice(t,{f0:430,f1:300,dur:0.13,gain:0.62,F1:850,F2:2100,noise:0.30});
+            barkVoice(t+0.19,{f0:460,f1:320,dur:0.12,gain:0.54,F1:880,F2:2200,noise:0.26}); },
     // 🐕 Пёс — средний «гав», с добродушным подхватом
-    D3:t=>{ barkVoice(t,{f0:250,f1:165,dur:0.22,gain:0.38,F1:560,F2:1400,noise:0.19});
-            barkVoice(t+0.30,{f0:265,f1:180,dur:0.16,gain:0.28,F1:600,F2:1500,noise:0.13}); },
+    D3:t=>{ barkVoice(t,{f0:250,f1:165,dur:0.22,gain:0.70,F1:560,F2:1400,noise:0.33});
+            barkVoice(t+0.30,{f0:265,f1:180,dur:0.16,gain:0.52,F1:600,F2:1500,noise:0.23}); },
     // 🐶 Щенок — три коротких тонких «тяф», последний с вопросительным подъёмом:
     // f1 выше f0 — интонация уходит вверх, это и читается как «милый»
-    D4:t=>{ [[640,470,0.30],[625,470,0.28],[610,730,0.26]].forEach(([f0,f1,gain],i)=>
-              barkVoice(t+i*0.14,{f0,f1,dur:0.09,gain,F1:1250,F2:2800,noise:0.13})); }
+    D4:t=>{ [[640,470,0.56],[625,470,0.52],[610,730,0.48]].forEach(([f0,f1,gain],i)=>
+              barkVoice(t+i*0.14,{f0,f1,dur:0.09,gain,F1:1250,F2:2800,noise:0.22})); }
   };
-  function sfxDog(id){ ensureAudio(); if(!SND.on||!SND.ctx)return; const f=DOG_BARK[id]; if(f) f(SND.ctx.currentTime); }
-  function sfxFanfare(){ ensureAudio(); if(!SND.on||!SND.ctx)return; const t0=SND.ctx.currentTime;
-    [0,4,7,12,16,19].forEach((s,i)=>{ const t=t0+i*0.09; const o=SND.ctx.createOscillator(); o.type='triangle'; o.frequency.value=noteFreq(s);
-      const g=SND.ctx.createGain(); g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.22,t+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t+0.42);
-      o.connect(g); g.connect(SND.sGain); o.start(t); o.stop(t+0.46); }); }
-  function coinHit(t,f,gain){ if(!SND.ctx)return;
+  /* Вой для бонуса. Лай — событие, вой — объявление: длинный, с вибрато и гласной
+     «у» (низкая первая форманта при высокой второй). Ничего похожего на монеты в нём
+     нет, а это и требовалось: прежний бонус звучал той же кассой, что обычный
+     выигрыш, только дольше. */
+  function howl(t){ if(!SND.ctx)return;
+    const C=SND.ctx, dur=1.15;
+    const out=C.createGain();
+    out.gain.setValueAtTime(0.0001,t);
+    out.gain.exponentialRampToValueAtTime(0.6,t+0.18);      // вой набирает силу плавно
+    out.gain.setValueAtTime(0.6,t+dur*0.55);
+    out.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    out.connect(SND.sGain);
+    const o=C.createOscillator(); o.type='sawtooth';
+    o.frequency.setValueAtTime(210,t);
+    o.frequency.exponentialRampToValueAtTime(340,t+0.3);    // «у-у-У» — подъём…
+    o.frequency.setValueAtTime(340,t+dur*0.6);
+    o.frequency.exponentialRampToValueAtTime(215,t+dur);    // …и спад в конце
+    // вибрато: без него вой звучит сигнализацией, а не собакой
+    const lfo=C.createOscillator(); lfo.type='sine'; lfo.frequency.value=5.5;
+    const lg=C.createGain(); lg.gain.value=9;
+    lfo.connect(lg); lg.connect(o.frequency); lfo.start(t); lfo.stop(t+dur+0.05);
+    [[420,1.0,8],[1150,0.45,10]].forEach(([fq,amp,q])=>{
+      const flt=C.createBiquadFilter(); flt.type='bandpass'; flt.frequency.value=fq; flt.Q.value=q;
+      const fg=C.createGain(); fg.gain.value=amp;
+      o.connect(flt); flt.connect(fg); fg.connect(out);
+    });
+    const lp=C.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=1600;
+    const body=C.createGain(); body.gain.value=0.18;
+    o.connect(lp); lp.connect(body); body.connect(out);
+    o.start(t); o.stop(t+dur+0.05);
+  }
+  /* dest — куда сыпать монеты. По умолчанию общая шина эффектов, но выплата и бонус
+     подают свою: её можно приглушить под лай, не задев самого лая. */
+  function coinHit(t,f,gain,dest){ if(!SND.ctx)return;
+    const out=dest||SND.sGain;
     [1,1.48,2.03,3.01].forEach((r,i)=>{
       const o=SND.ctx.createOscillator(); o.type=i<2?'triangle':'sine'; o.frequency.value=f*r;
       const g=SND.ctx.createGain(); const gg=gain*(i===0?1:0.45/i);
       g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(gg,t+0.005);
       g.gain.exponentialRampToValueAtTime(0.0001,t+0.13+0.03*i);
-      o.connect(g); g.connect(SND.sGain); o.start(t); o.stop(t+0.22);
+      o.connect(g); g.connect(out); o.start(t); o.stop(t+0.22);
     }); }
   function sfxAnticipate(dur){ ensureAudio(); if(!SND.on||!SND.ctx)return; dur=Math.max(0.4,dur||1);
     const t=SND.ctx.currentTime;
@@ -709,9 +799,11 @@
       o.connect(g); g.connect(SND.sGain); o.start(t); o.stop(t+0.42); });
     // звонкий каскад монет (~5 дзинь/сек)
     for(let i=0;i<22;i++){ const t=t0+0.05+Math.random()*1.25; const f=560+Math.random()*900; coinHit(t,f,0.10+Math.random()*0.06); } }
-  /* Джекпот: то, как выплату отдаёт настоящий автомат — колокол, шорох металла
-     в лотке и густая россыпь монет, редеющая к концу. Отдельно от sfxCoins:
-     тот короткий и играет на обычном крупном выигрыше, этот — на бонусе.
+  /* Бонус. Прежняя версия была той же кассой, что обычный выигрыш: тот же coinHit,
+     только гуще и дольше, — и на слух бонус от крупного выигрыша не отличался вообще.
+     Теперь порядок событий другой и главное в нём не монеты, а собака: колокол →
+     вой → россыпь монет под лай. Монеты идут своей шиной, которую вой и лай
+     приглушают: складывать их поверх бесполезно, звонкие удары маскируют голос.
      dur — сколько секунд сыпется; больше 3с не ставить, иначе перегружает мобилки. */
   function sfxJackpot(dur){ ensureAudio(); if(!SND.on||!SND.ctx)return;
     const C=SND.ctx, t0=C.currentTime; dur=Math.max(0.6,Math.min(3,dur||1.6));
@@ -723,21 +815,35 @@
       g.gain.exponentialRampToValueAtTime(0.0001,t0+1.1);
       o.connect(g); g.connect(SND.sGain); o.start(t0); o.stop(t0+1.15);
     });
+    const tH=t0+0.14, hEnd=tH+1.15;       // вой: он и объявляет бонус
+    howl(tH);
+    // монеты — своей шиной, чтобы приглушать их под голос, а не наоборот
+    const bus=C.createGain(); bus.gain.setValueAtTime(0.28,t0); bus.connect(SND.sGain);
+    const cStart=hEnd-0.25;               // сыпется уже на спаде воя
+    bus.gain.setValueAtTime(0.28,cStart-0.05);
+    bus.gain.linearRampToValueAtTime(1,cStart+0.2);
     // шорох металла в лотке: полосовой шум, затухает вместе с потоком монет
     const len=Math.floor(C.sampleRate*dur);
     const buf=C.createBuffer(1,len,C.sampleRate), d=buf.getChannelData(0);
     for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*(1-i/len);
     const n=C.createBufferSource(); n.buffer=buf;
     const nf=C.createBiquadFilter(); nf.type='bandpass'; nf.frequency.value=3800; nf.Q.value=0.7;
-    const ng=C.createGain(); ng.gain.setValueAtTime(0.075,t0);
-    ng.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
-    n.connect(nf); nf.connect(ng); ng.connect(SND.sGain); n.start(t0); n.stop(t0+dur);
-    // сами монеты: плотно в начале, реже к концу
-    const cnt=Math.round(dur*13);
+    const ng=C.createGain(); ng.gain.setValueAtTime(0.06,cStart);
+    ng.gain.exponentialRampToValueAtTime(0.0001,cStart+dur);
+    n.connect(nf); nf.connect(ng); ng.connect(bus); n.start(cStart); n.stop(cStart+dur);
+    // сами монеты: реже, чем в прежней версии — они больше не единственный звук
+    const cnt=Math.round(dur*9);
     for(let i=0;i<cnt;i++){
-      const t=t0+0.05+Math.pow(Math.random(),0.7)*dur*0.95;
-      coinHit(t,620+Math.random()*1000,0.09+Math.random()*0.06);
+      const t=cStart+0.05+Math.pow(Math.random(),0.7)*dur*0.95;
+      coinHit(t,620+Math.random()*1000,0.09+Math.random()*0.06,bus);
     }
+    // лай в конце: подтверждение, что праздник собачий. Под каждый — просадка монет
+    const bt=[cStart+dur*0.55,cStart+dur*0.55+0.5];
+    DOG_BARK.D1(bt[0]); DOG_BARK.D3(bt[1]);
+    bt.forEach(t=>{ bus.gain.setValueAtTime(1,Math.max(cStart,t-0.10));
+      bus.gain.linearRampToValueAtTime(0.22,t); bus.gain.setValueAtTime(0.22,t+0.34);
+      bus.gain.linearRampToValueAtTime(1,t+0.5); });
+    duckMusic(hEnd-t0+dur+0.6);
   }
   function setIcons(){
     $('navDaily').innerHTML='<img class="btn-ic" src="'+ICONS.gift+'"><span class="badge" id="dailyBadge"></span>';
@@ -755,13 +861,42 @@
   const fmt=n=>Math.round(n).toLocaleString('ru-RU');
 
   /* ===== PLATFORM (VK Bridge + фолбэк для отладки вне VK) ===== */
-  const bridge=window.vkBridge||null;
+  let bridge=window.vkBridge||null;
   const vkParams=new URLSearchParams(location.search);
-  const inVK=!!bridge&&(vkParams.has('vk_app_id')||vkParams.has('vk_platform'));
-  const isMobileVK=inVK&&/mobile/i.test(vkParams.get('vk_platform')||'');
+  /* Параметры запуска — единственный надёжный признак, что мы внутри VK: мост может
+     не загрузиться, а вот vk_app_id подставляет сам клиент. */
+  const launchedByVK=vkParams.has('vk_app_id')||vkParams.has('vk_platform');
+  let inVK=!!bridge&&launchedByVK;
+  let isMobileVK=inVK&&/mobile/i.test(vkParams.get('vk_platform')||'');
+  /* Мост подключён с unpkg.com, и это единственная внешняя зависимость игры. Ляжет
+     CDN — не будет ни хранилища, ни рекламы, ни покупок, а игра молча уедет в
+     браузерный фолбэк и в VK будет выглядеть сломанной. Поэтому при запуске из VK,
+     если мост не появился, пробуем вторую копию с другого CDN. Ждём не дольше пяти
+     секунд: лучше запустить игру без моста, чем показывать загрузчик вечно. */
+  const BRIDGE_ALT='https://cdn.jsdelivr.net/npm/@vkontakte/vk-bridge/dist/browser.min.js';
+  async function ensureBridge(){
+    if(bridge||!launchedByVK) return;
+    await new Promise(res=>{
+      let done=false; const fin=()=>{ if(!done){ done=true; res(); } };
+      const s=document.createElement('script');
+      s.src=BRIDGE_ALT; s.async=true; s.onload=fin; s.onerror=fin;
+      document.head.appendChild(s);
+      setTimeout(fin,5000);
+    });
+    bridge=window.vkBridge||null;
+    inVK=!!bridge;
+    isMobileVK=inVK&&/mobile/i.test(vkParams.get('vk_platform')||'');
+    Platform.inVK=inVK;
+  }
   const APP_ID=vkParams.get('vk_app_id')||'';
   const APP_URL=APP_ID?('https://vk.com/app'+APP_ID):'https://vk.com/';
   const mem={}; const wait=ms=>new Promise(r=>setTimeout(r,ms));
+  /* Про отвалившееся хранилище VK говорим один раз за сеанс, и не раньше, чем игра
+     покажется: тост в момент загрузки никто не прочитает. */
+  let storageWarned=false;
+  function onStorageDegraded(){
+    setTimeout(()=>toast('Прогресс сохраняется только на этом устройстве: хранилище ВКонтакте не отвечает.',5200),1200);
+  }
 
   /* Таймаут допустим ТОЛЬКО на служебных вызовах. На диалоговых (шер, реклама) он
      ломает функциональность: диалог ждёт действия игрока дольше любого таймера,
@@ -778,12 +913,19 @@
   }
   const Platform={
     inVK,
-    async init(){ if(!inVK) return; try{ await svc('VKWebAppInit'); }catch(e){} },
+    async init(){ await ensureBridge(); if(!inVK) return; try{ await svc('VKWebAppInit'); }catch(e){} },
     async storageGet(k){
       if(inVK){try{const r=await svc('VKWebAppStorageGet',{keys:[k]});return r.keys&&r.keys[0]?r.keys[0].value:'';}catch(e){}}
       try{return localStorage.getItem(k)||'';}catch(e){return mem[k]||'';}},
+    /* Если хранилище VK не ответило, прогресс уходит в localStorage — играть можно,
+       но между устройствами он больше не переносится, а правила требуют синхронизации.
+       Молча так оставлять нельзя: игрок должен знать, что его баланс остался здесь.
+       Предупреждаем один раз за сеанс — не на каждом спине. */
     async storageSet(k,v){
-      if(inVK){try{await svc('VKWebAppStorageSet',{key:k,value:v});return;}catch(e){}}
+      if(inVK){
+        try{ await svc('VKWebAppStorageSet',{key:k,value:v}); return; }
+        catch(e){ if(!storageWarned){ storageWarned=true; onStorageDegraded(); } }
+      }
       try{localStorage.setItem(k,v);}catch(e){mem[k]=v;}},
     async config(){ if(!inVK) return null; try{ return await svc('VKWebAppGetConfig'); }catch(e){ return null; } },
     onConfigUpdate(fn){ if(!inVK) return; try{ bridge.subscribe(e=>{
@@ -822,15 +964,31 @@
   /* Свой верхний бар обязан уходить ниже системных кнопок VK (···, X, «ВКонтакте»),
      иначе они наезжают на баланс. Берём реальные insets, а если их нет — 54px
      на мобильных клиентах, где эти кнопки есть всегда. */
+  /* Запретные полосы в пикселях: вёрстка закрывает их через calc(), но карточка
+     обучения ставится из JS по координатам, и ей нужны числа. env(safe-area-inset-*)
+     из JS не прочитать — меряем пробником, который эти отступы применяет. */
+  const INS={top:0,bot:0};
+  function safeArea(){
+    const p=document.createElement('div');
+    p.style.cssText='position:fixed;left:-9999px;top:0;visibility:hidden;'+
+      'padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)';
+    document.body.appendChild(p);
+    const cs=getComputedStyle(p);
+    const r={top:parseFloat(cs.paddingTop)||0, bot:parseFloat(cs.paddingBottom)||0};
+    p.remove(); return r;
+  }
   function applyInsets(cfg){
     const ins=(cfg&&cfg.insets)||null;
     let top=ins&&typeof ins.top==='number'?ins.top:null;
     let bot=ins&&typeof ins.bottom==='number'?ins.bottom:null;
     if(top==null) top=isMobileVK?54:0;
     if(bot==null) bot=0;
+    top=Math.max(0,top); bot=Math.max(0,bot);
     const root=document.documentElement.style;
-    root.setProperty('--vk-top',Math.max(0,top)+'px');
-    root.setProperty('--vk-bottom',Math.max(0,bot)+'px');
+    root.setProperty('--vk-top',top+'px');
+    root.setProperty('--vk-bottom',bot+'px');
+    const sa=safeArea();
+    INS.top=top+sa.top; INS.bot=bot+sa.bot;
     sizeReels(); renderStatic(); layoutTour();
   }
 
@@ -1146,9 +1304,8 @@
       S.balance+=res.total; renderBalance();
       // Размер выигрыша в ставках — от него зависит и длина потока монет, и лай.
       const x=res.total/totalBet();
-      sfxWin(x);   // сам подбирает длительность и добавляет колокол на x>=5
       // Лай выигравших собак: у каждой свой голос, лают по очереди и не перебивая
-      // друг друга — пауза 480мс больше самой длинной серии «тяв» (щенок, 360мс).
+      // друг друга — пауза 520мс больше самой длинной серии «тяв» (щенок, 360мс).
       // Не больше трёх голосов за спин, иначе на 20 линиях получается свалка.
       let dogs=[...new Set(res.wins.filter(w=>/^D[1-4]$/.test(w.sym)).map(w=>w.sym))].slice(0,3);
       /* Собаки — старшие символы, а значит редкие: замер на 1 млн спинов дал лай всего
@@ -1159,7 +1316,10 @@
          голос. Порог 5 ставок, а не любой выигрыш: иначе лай станет фоном и перестанет
          означать удачу. */
       if(!dogs.length && x>=5) dogs=[x>=25?'D1':x>=10?'D3':'D4'];
-      dogs.forEach((d,i)=> setTimeout(()=>sfxDog(d), 200+i*480));
+      /* Лай передаётся в sfxWin, а не играется отдельным setTimeout: он должен
+         звучать в паузах между монетами, а поток монет — приседать под голос.
+         Пока это были два независимых звука, лай просто маскировался кассой. */
+      sfxWin(x,dogs);
       if(S.freeMode) S.freeWon+=res.total;
       highlightWins(res);
       if(!S.freeMode) $('winVal').textContent=fmt(res.total);
@@ -1225,8 +1385,10 @@
     $('fsSub').textContent='Вайлды-будки становятся липкими. Нажмите, чтобы начать';
     $('fsIcon').src = (typeof ICONS!=='undefined' && ICONS.fsStart) ? ICONS.fsStart : ICONS.gift;
     $('fsBanner').classList.add('show');
-    // фанфара + каскад монет: бонус должен звучать как выплата автомата
-    sfxFanfare(); sfxJackpot(1.7); coinRain(10);
+    /* Один звук на триггер, а не два: прежняя фанфара (арпеджио) играла ровно
+       поверх колокола и воя из sfxJackpot и превращала объявление бонуса в кашу.
+       Объявляет бонус собака — это и слышно. */
+    sfxJackpot(1.7); coinRain(10);
     // ждём нажатие игрока, потом убираем экран и запускаем первый фри-спин
     S.awaitStart=true;
     const go=()=>{ if(!S.awaitStart)return; S.awaitStart=false;
@@ -1267,7 +1429,10 @@
 
   function renderBuy(){
     const b=$('buyBonus'); if(!b) return;
-    $('buyCost').textContent=fmt(buyCost());
+    /* Цена меняется вместе со ставкой, поэтому она не в тексте кнопки, а в подсказке
+       и в имени для чтения с экрана: сама кнопка подписана словами. */
+    const price='Купить бесплатные спины за '+fmt(buyCost())+' монет (50 ставок)';
+    b.title=price; b.setAttribute('aria-label',price);
     // Прячем на время бонуса вместе со ставкой: во фри-спинах покупать нечего.
     b.style.display = S.freeMode ? 'none' : '';
     b.disabled = S.spinning || S.freeMode || tourActive || S.balance<buyCost();
@@ -1307,7 +1472,8 @@
   function addCoins(n){ S.balance+=n; renderBalance(); if(canAfford()) closeBroke(); scheduleSave(); updateCoinTimers(); }
 
   /* Реклама: не чаще раза в 30 секунд и никогда во время обучения — прямые
-     требования правил размещения. */
+     требования правил размещения. lastAdAt лежит в сохранении, иначе кулдаун
+     сбрасывается перезапуском приложения. */
   const AD_COOLDOWN=30000; let lastAdAt=0;
   async function watchAd(btn,reward){
     if(tourActive){ toast('Реклама недоступна во время обучения.'); return; }
@@ -1505,7 +1671,7 @@
     {t:'Вайлд и скаттер',sel:'#navInfo',
      x:'🏠 Будка — вайлд: заменяет любой символ и умножает линию на ×2 или ×3. 💎 Самоцвет — скаттер: три и больше запускают бесплатные спины. Полная таблица выплат прячется здесь.'},
     {t:'Бонус можно купить',sel:'#buyBonus',
-     x:'Ждать скаттеры не обязательно: кнопка 🎁 сразу покупает бесплатные спины за 50 ставок. Цена на кнопке — в монетах, она меняется вместе со ставкой. Крупный выигрыш это не гарантирует: чаще бонус приносит меньше своей цены.'},
+     x:'Ждать скаттеры не обязательно: кнопка 🎁 сразу покупает бесплатные спины за 50 ставок — цену покажет окно подтверждения, и она растёт вместе со ставкой. Крупный выигрыш это не гарантирует: чаще бонус приносит меньше своей цены.'},
     {t:'Ежедневная награда',sel:'#navDaily',
      x:'Заходите каждый день — награда растёт до седьмого дня подряд, а потом счёт начинается заново. Если монеты закончились, в 🛒 можно взять ещё за короткий ролик: покупать в игре нечего, платных монет нет.'},
     {t:'Готово!',
@@ -1541,29 +1707,34 @@
       guard.style.display=st.act?'none':'block';
       guard.style.cssText+=';left:'+r.l+'px;top:'+r.t+'px;width:'+r.w+'px;height:'+r.h+'px';
     }
-    // Карточка ставится под окном, если не влезает — над ним. Перекрывать подсветку нельзя.
-    card.style.maxHeight='';
+    /* Карточка ставится под окном, если не влезает — над ним. Перекрывать подсветку
+       нельзя. Считаем не по всей высоте экрана, а по полосе между запретными зонами:
+       сверху кнопки VK и «монобровь», снизу домашняя полоса iPhone. Иначе кнопки
+       «Далее»/«Пропустить» на последних шагах уезжают под системный интерфейс —
+       а шаг с обязательным действием становится непроходимым. */
+    const yTop=INS.top+8, yBot=vh-INS.bot-8, band=Math.max(96,yBot-yTop);
+    card.style.maxHeight=band+'px';
     card.style.top='0px';
     let ch=card.offsetHeight;
     let top;
-    if(!r) top=Math.max(12,(vh-ch)/2);
+    if(!r) top=yTop+Math.max(0,(band-ch)/2);
     else {
       const below=r.t+r.h+14, above=r.t-ch-14;
-      if(below+ch<=vh-12) top=below;
-      else if(above>=12) top=above;
+      if(below+ch<=yBot) top=below;
+      else if(above>=yTop) top=above;
       else {
         // Подсветка занимает почти всю высоту экрана (так на портрете с барабанами):
         // центрировать карточку нельзя — она ляжет на подсвеченное. Кладём её в ту
         // затемнённую полосу, где места больше, и подрезаем по высоте: текст внутри
         // скроллится, кнопки остаются видимыми.
-        const spaceBelow=vh-(r.t+r.h), spaceAbove=r.t;
+        const spaceBelow=yBot-(r.t+r.h), spaceAbove=r.t-yTop;
         const useBelow=spaceBelow>=spaceAbove;
         card.style.maxHeight=Math.max(96,Math.max(spaceBelow,spaceAbove)-16)+'px';
         ch=card.offsetHeight;
-        top=useBelow?Math.min(r.t+r.h+8,vh-ch-8):Math.max(8,r.t-ch-8);
+        top=useBelow?(r.t+r.h+8):(r.t-ch-8);
       }
     }
-    card.style.top=Math.round(Math.max(0,top))+'px';
+    card.style.top=Math.round(Math.max(yTop,Math.min(top,yBot-ch)))+'px';
   }
 
   function showTourStep(i){
@@ -1601,7 +1772,14 @@
   function scheduleSave(){ clearTimeout(st); st=setTimeout(save,500); }
   async function save(){ await Platform.storageSet(KEY, JSON.stringify({balance:S.balance,betIdx:S.betIdx,
     loginStreak:S.loginStreak,lastDay:S.lastDay,dailyClaimed:S.dailyClaimed,sound:S.sound,
-    tourDone:S.tourDone,nextFree:S.nextFree})); }
+    tourDone:S.tourDone,nextFree:S.nextFree,lastAdAt:lastAdAt})); }
+  /* Сохранение отложено на 500 мс, чтобы не дёргать хранилище на каждом спине, — но
+     свёрнутое приложение эти 500 мс не переживёт: на мобилке страницу выгружают без
+     предупреждения, а pagehide в iOS-вебвью иногда не приходит вообще. Поэтому пишем
+     сразу, как только игра перестала быть видимой. */
+  function saveNow(){ clearTimeout(st); st=null; save(); }
+  document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden') saveNow(); });
+  addEventListener('pagehide',saveNow);
   /* Сохранение читаем по списку полей, а не через Object.assign. Раньше в состояние
      заезжало всё, что лежало в записи: подложив в хранилище `{"spinning":true}`, игру
      можно было насмерть заблокировать (спин навсегда считает себя идущим), а `betIdx`
@@ -1620,6 +1798,10 @@
     S.sound=d.sound===undefined?S.sound:!!d.sound;
     S.tourDone=!!d.tourDone;
     S.nextFree=num(d.nextFree,0,Date.now()+FREE_PERIOD,S.nextFree);
+    /* Кулдаун рекламы обязан переживать перезапуск: иначе «не чаще одного ролика
+       в 30 секунд» обходится закрытием и открытием приложения. Из будущего значение
+       не берём — подкрученные часы не должны запирать рекламу навсегда. */
+    lastAdAt=num(d.lastAdAt,0,Date.now(),0);
   }
 
   /* ===== INIT ===== */
