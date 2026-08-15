@@ -11,4 +11,4 @@ compatibility_date = "2025-01-01"
 
 [[kv_namespaces]]
 binding = "ORDERS"
-id = "ЗАМЕНИТЬ_НА_ID_ИЗ_WRANGLER"
+id = "90b6aa49513440a691099cce0073761c"
